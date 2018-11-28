@@ -75,6 +75,7 @@ public class WifiManagerPlugin extends CordovaPlugin {
     private static final String ACTION_START_SCAN = "startScan";
     private static final String ACTION_UPDATE_NETWORK = "updateNetwork";
     private static final String ACTION_ON_CHANGE = "onChange";
+    private static final String SAVE_EAP_CONFIG = "saveEapConfig";
 
     private WifiManager wifiManager;
     private volatile CallbackContext onChange;
@@ -187,6 +188,7 @@ public class WifiManagerPlugin extends CordovaPlugin {
         else if(action.equals(ACTION_IS_WIFI_AP_ENABLED)) return isWifiApEnabled(callbackContext);
         else if(action.equals(ACTION_IS_WIFI_ENABLED)) isWifiEnabled(callbackContext);
         else if(action.equals(ACTION_REASSOCIATE)) reassociate(callbackContext);
+        else if(action.equals(SAVE_EAP_CONFIG)) saveEapConfig(callbackContext, data);
         else if(action.equals(ACTION_RECONNECT)) reconnect(callbackContext);
         else if(action.equals(ACTION_REMOVE_NETWORK)) removeNetwork(args, callbackContext);
         else if(action.equals(ACTION_SAVE_CONFIGURATION)) saveConfiguration(callbackContext);
@@ -343,6 +345,39 @@ public class WifiManagerPlugin extends CordovaPlugin {
 
         return true;
     }
+
+    // EAP CONFIG
+
+    private boolean saveEapConfig(CallbackContext callbackContext, JSONArray data) {
+        try {
+            WifiConfiguration con = new WifiConfiguration();
+            con = this.setWifiConfigurations(con, data.getString(0), data.getString(1), data.getString(2));
+
+            boolean res1 = wifiManager.setWifiEnabled(true);
+            int networkId = wifiManager.addNetwork(con);
+            boolean b = wifiManager.enableNetwork(networkId, true);
+            boolean isWifiConnected = wifiManager.isWifiEnabled();
+            Log.d("Wifi Connection", "Wifi Connected: " + isWifiConnected);
+            System.out.println("Wifi Connected: " + isWifiConnected);
+            System.out.println("Wifi Info: " + wifiManager.getConnectionInfo());
+            System.out.println("Wifi enterpriseConfig info: " + con.enterpriseConfig);
+
+            if(!res1 || networkId == -1 || !b || !isWifiConnected) {
+                callbackContext.error("Sem Conexão!");
+                return false;
+            }
+            else {
+                callbackContext.success("Conectado com sucesso!");
+                return true;
+            }
+        } catch (Exception e) {
+            callbackContext.error(e.getMessage());
+            return false;
+        }
+    }
+
+    // END EAP CONFIG
+      
 
     private void isWifiEnabled(CallbackContext callbackContext) throws JSONException {
         boolean enabled = wifiManager.isWifiEnabled();
@@ -920,5 +955,198 @@ public class WifiManagerPlugin extends CordovaPlugin {
         public CallbackContext getCallbackContext() {
             return callbackContext;
         }
+    }
+
+
+    public WifiConfiguration setWifiConfigurations(WifiConfiguration wifiConfig, String mySSID, String userName, String userPass) {
+
+        final String INT_PRIVATE_KEY = "private_key";
+        final String INT_PHASE2 = "phase2";
+        final String INT_PASSWORD = "password";
+        final String INT_IDENTITY = "identity";
+        final String INT_EAP = "eap";
+        final String INT_CLIENT_CERT = "client_cert";
+        final String INT_CA_CERT = "ca_cert";
+        final String INT_ANONYMOUS_IDENTITY = "anonymous_identity";
+        final String INT_ENTERPRISEFIELD_NAME = "android.net.wifi.WifiConfiguration$EnterpriseField";
+        final String INT_IPASSIGNMENT = "android.net.wifi.WifiConfiguration$IpAssignment";
+        final String INT_PROXYSETTINGS = "android.net.wifi.WifiConfiguration$ProxySettings";
+        final String ENTERPRISE_EAP = "PEAP";
+        final String INT_IP_ASSIGNMENT = "ipAssignment";
+        final String INT_PROXY_SETTINGS = "proxySettings";
+
+        /*define basic configuration settings*/
+
+        /*Access Point*/
+        wifiConfig.SSID = mySSID;
+
+        /*Priority*/
+        wifiConfig.priority = 0;
+
+        /*Enable Hidden SSID's*/
+        wifiConfig.hiddenSSID = false;
+
+        /*Key Management*/
+        wifiConfig.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.IEEE8021X);
+        wifiConfig.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.WPA_EAP);
+
+        /*Set Group Ciphers*/
+        wifiConfig.allowedGroupCiphers.clear();
+        wifiConfig.allowedGroupCiphers.clear();
+        wifiConfig.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.CCMP);
+        wifiConfig.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.TKIP);
+        wifiConfig.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.WEP104);
+        wifiConfig.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.WEP40);
+
+
+         /*Set Pairwise Ciphers*/
+        wifiConfig.allowedPairwiseCiphers.clear();
+        wifiConfig.allowedPairwiseCiphers.set(WifiConfiguration.PairwiseCipher.CCMP);
+        wifiConfig.allowedPairwiseCiphers.set(WifiConfiguration.PairwiseCipher.TKIP);
+
+        /*Set Protocols*/
+        wifiConfig.allowedProtocols.clear();
+        wifiConfig.allowedProtocols.set(WifiConfiguration.Protocol.RSN);
+        wifiConfig.allowedProtocols.set(WifiConfiguration.Protocol.WPA);
+
+        /*Set EnterpriseConfig*/
+        WifiEnterpriseConfig enterpriseConfig = new WifiEnterpriseConfig();
+        enterpriseConfig.setIdentity(userName);
+        enterpriseConfig.setPassword(userPass);
+        enterpriseConfig.setEapMethod(WifiEnterpriseConfig.Eap.PEAP);
+        wifiConfig.enterpriseConfig = enterpriseConfig;
+
+
+        /*Set Enterprise Settings Using Reflection*/
+        try {
+            Class<?> wifiEnterpriseField = null;
+            Class<?> wifiIpAssignmentField = null;
+            Class<?> wifiProxySettingsField = null;
+
+            boolean enterpriseFieldType = true;
+            boolean ipAssignmentFieldType = true;
+            boolean proxySettingsFieldType = true;
+
+            Field anonymousId = null, caCert = null, clientCert = null, eap = null, identity = null, password = null, phase2 = null, privateKey = null, ipAssignment = null, proxy = null;
+
+            Method setValue = null;
+            Method setIpName = null;
+            Method setProxy = null;
+            Class<?>[] wifiClasses = WifiConfiguration.class.getClasses();
+
+            /*Get Enterprise/IP Assignment/Proxy Setting Field Class to Modify*/
+            for(Class<?> wifiClass : wifiClasses) {
+                if(wifiClass.getName().equals(INT_ENTERPRISEFIELD_NAME)) {
+                    wifiEnterpriseField = wifiClass;
+                }
+                else if(wifiClass.getName().equals(INT_IPASSIGNMENT)) {
+                    wifiIpAssignmentField = wifiClass;
+                }
+                else if(wifiClass.getName().equals(INT_PROXY_SETTINGS)) {
+                    wifiProxySettingsField = wifiClass;
+                }
+            }
+
+            /*Certain OS (Cupcake & Doughnut) access the enterprise field directly*/
+            if(wifiEnterpriseField == null) {
+                enterpriseFieldType = false;
+            }
+            if(wifiIpAssignmentField == null) {
+                ipAssignmentFieldType = false;
+            }
+            if(wifiProxySettingsField == null) {
+                proxySettingsFieldType = false;
+            }
+
+            /*Get Fields*/
+            Log.d("Enterprise Setting", "Getting Fields ");
+            Field[] wifiFields = WifiConfiguration.class.getFields();
+            for(Field wifiField : wifiFields) {
+                if(wifiField.getName().equals(INT_ANONYMOUS_IDENTITY)) {
+                    anonymousId = wifiField;
+                    Log.d("Enterprise Setting", "INT_ANONYMOUS_IDENTITY: " + wifiField);
+                }
+                else if(wifiField.getName().equals(INT_CA_CERT)) {
+                    caCert = wifiField;
+                    Log.d("Enterprise Setting", "INT_CA_CERT: " + wifiField);
+                }
+                else if(wifiField.getName().equals(INT_CLIENT_CERT))
+                {
+                    clientCert = wifiField;
+                    Log.d("Enterprise Setting", "INT_CLIENT_CERT: " + wifiField);
+                }
+                else if(wifiField.getName().equals(INT_EAP)) {
+                    eap = wifiField;
+                    Log.d("Enterprise Setting", "INT_EAP: " + wifiField);
+                }
+                else if(wifiField.getName().equals(INT_IDENTITY)) {
+                    identity = wifiField;
+                    Log.d("Enterprise Setting", "INT_IDENTITY: " + wifiField);
+                }
+                else if(wifiField.getName().equals(INT_PASSWORD)) {
+                    password = wifiField;
+                    Log.d("Enterprise Setting", "INT_PASSWORD: " + wifiField);
+                }
+                else if(wifiField.getName().equals(INT_PHASE2)) {
+                    phase2 = wifiField;
+                    Log.d("Enterprise Setting", "INT_PHASE2: " + wifiField);
+                }
+                else if(wifiField.getName().equals(INT_PRIVATE_KEY)) {
+                    privateKey = wifiField;
+                    Log.d("Enterprise Setting", "INT_PRIVATE_KEY: " + wifiField);
+                }
+                else if(wifiField.getName().equals(INT_IP_ASSIGNMENT)) {
+                    ipAssignment = wifiField;
+                    Log.d("Enterprise Setting", "INT_IP_ASSIGNMENT: " + wifiField);
+                }
+                else if(wifiField.getName().equals(INT_PROXY_SETTINGS)) {
+                    proxy = wifiField;
+                    Log.d("Enterprise Setting", "INT_PROXY_SETTINGS 1: " + wifiField);
+                }
+
+                else {
+                    Log.d("Enterprise Setting", "INT_PROXY_SETTINGS 2: " + wifiField);
+                }
+
+            }
+
+            /*Get method to set value of enterprise fields*/
+            if(enterpriseFieldType) {
+                for(Method method : wifiEnterpriseField.getMethods()) {
+                    Log.d("Get Methods", "Enterprise Method: " + method);
+                    if(method.getName().trim().equals("setValue")) {
+                        setValue = method;
+                        break;
+                    }
+                }
+            }
+
+            /*Get method to set value of IP Assignment fields*/
+            if(ipAssignmentFieldType) {
+                for(Method method : wifiIpAssignmentField.getMethods()) {
+                    Log.d("Get Methods", "IP Method: " + method);
+                    if(method.getName().trim().equals("setName")) {
+                        setIpName = method;
+                        break;
+                    }
+                }
+            }
+
+            /*Get method to set value of IP Assignment fields*/
+            if(proxySettingsFieldType) {
+                for(Method method : wifiProxySettingsField.getMethods()) {
+                    Log.d("Get Methods", "Proxy Method: " + method);
+                    if(method.getName().trim().equals("setName")) {
+                        setProxy = method;
+                        break;
+                    }
+                }
+            }
+        }
+        catch(Exception e) {
+            e.printStackTrace();
+        }
+
+        return wifiConfig;
     }
 }
