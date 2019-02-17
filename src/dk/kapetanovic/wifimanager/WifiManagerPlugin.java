@@ -87,9 +87,8 @@ public class WifiManagerPlugin extends CordovaPlugin {
     public void initialize(CordovaInterface cordova, CordovaWebView webView) {
         super.initialize(cordova, webView);
 
-        wifiManager = (WifiManager) cordova.getActivity()
+        wifiManager = (WifiManager) cordova.getActivity().getApplicationContext()
                 .getApplication()
-                .getApplicationContext()
                 .getSystemService(Context.WIFI_SERVICE);
     }
 
@@ -958,211 +957,195 @@ public class WifiManagerPlugin extends CordovaPlugin {
     }
 
 
-    public WifiConfiguration setWifiConfigurations(WifiConfiguration selectedConfig, String mySSID, String userName, String userPass) {
+    public WifiConfiguration setWifiConfigurations(WifiConfiguration wifiConfig, String mySSID, String userName, String userPass) {
 
-        /********************************Configuration Strings****************************************************/
+        final String INT_PRIVATE_KEY = "private_key";
+        final String INT_PHASE2 = "phase2";
+        final String INT_PASSWORD = "password";
+        final String INT_IDENTITY = "identity";
+        final String INT_EAP = "eap";
+        final String INT_CLIENT_CERT = "client_cert";
+        final String INT_CA_CERT = "ca_cert";
+        final String INT_ANONYMOUS_IDENTITY = "anonymous_identity";
+        final String INT_ENTERPRISEFIELD_NAME = "android.net.wifi.WifiConfiguration$EnterpriseField";
+        final String INT_IPASSIGNMENT = "android.net.wifi.WifiConfiguration$IpAssignment";
+        final String INT_PROXYSETTINGS = "android.net.wifi.WifiConfiguration$ProxySettings";
         final String ENTERPRISE_EAP = "PEAP";
-        final String ENTERPRISE_CLIENT_CERT = "";
-        final String ENTERPRISE_PRIV_KEY = "";
-        //CertificateName = Name given to the certificate while installing it
+        final String INT_IP_ASSIGNMENT = "ipAssignment";
+        final String INT_PROXY_SETTINGS = "proxySettings";
 
-        /*Optional Params- My wireless Doesn't use these*/
-        final String ENTERPRISE_PHASE2 = "";
-        final String ENTERPRISE_ANON_IDENT = "";
-        final String ENTERPRISE_CA_CERT = ""; // If required: "keystore://CACERT_CaCertificateName"
-        /********************************Configuration Strings****************************************************/
+        /*define basic configuration settings*/
 
-        /*AP Name*/
-        selectedConfig.SSID = "\"Tegra-Radius\"";
+        /*Access Point*/
+        wifiConfig.SSID = mySSID;
 
         /*Priority*/
-        selectedConfig.priority = 40;
+        wifiConfig.priority = 0;
 
-        /*Enable Hidden SSID*/
-        selectedConfig.hiddenSSID = true;
+        /*Enable Hidden SSID's*/
+        wifiConfig.hiddenSSID = false;
 
-        /*Key Mgmnt*/
-        selectedConfig.allowedKeyManagement.clear();
-        selectedConfig.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.IEEE8021X);
-        selectedConfig.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.WPA_EAP);
+        /*Key Management*/
+        wifiConfig.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.IEEE8021X);
+        wifiConfig.allowedKeyManagement.set(WifiConfiguration.KeyMgmt.WPA_EAP);
 
-        /*Group Ciphers*/
-        selectedConfig.allowedGroupCiphers.clear();
-        selectedConfig.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.CCMP);
-        selectedConfig.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.TKIP);
-        selectedConfig.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.WEP104);
-        selectedConfig.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.WEP40);
+        /*Set Group Ciphers*/
+        wifiConfig.allowedGroupCiphers.clear();
+        wifiConfig.allowedGroupCiphers.clear();
+        wifiConfig.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.CCMP);
+        wifiConfig.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.TKIP);
+        wifiConfig.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.WEP104);
+        wifiConfig.allowedGroupCiphers.set(WifiConfiguration.GroupCipher.WEP40);
 
-        /*Pairwise ciphers*/
-        selectedConfig.allowedPairwiseCiphers.clear();
-        selectedConfig.allowedPairwiseCiphers.set(WifiConfiguration.PairwiseCipher.CCMP);
-        selectedConfig.allowedPairwiseCiphers.set(WifiConfiguration.PairwiseCipher.TKIP);
 
-        /*Protocols*/
-        selectedConfig.allowedProtocols.clear();
-        selectedConfig.allowedProtocols.set(WifiConfiguration.Protocol.RSN);
-        selectedConfig.allowedProtocols.set(WifiConfiguration.Protocol.WPA);
+         /*Set Pairwise Ciphers*/
+        wifiConfig.allowedPairwiseCiphers.clear();
+        wifiConfig.allowedPairwiseCiphers.set(WifiConfiguration.PairwiseCipher.CCMP);
+        wifiConfig.allowedPairwiseCiphers.set(WifiConfiguration.PairwiseCipher.TKIP);
 
-        // Enterprise Settings
-        // Reflection magic here too, need access to non-public APIs
+        /*Set Protocols*/
+        wifiConfig.allowedProtocols.clear();
+        wifiConfig.allowedProtocols.set(WifiConfiguration.Protocol.RSN);
+        wifiConfig.allowedProtocols.set(WifiConfiguration.Protocol.WPA);
+
+        /*Set EnterpriseConfig*/
+        WifiEnterpriseConfig enterpriseConfig = new WifiEnterpriseConfig();
+        enterpriseConfig.setIdentity(userName);
+        enterpriseConfig.setPassword(userPass);
+        enterpriseConfig.setEapMethod(WifiEnterpriseConfig.Eap.PEAP);
+        wifiConfig.enterpriseConfig = enterpriseConfig;
+
+
+        /*Set Enterprise Settings Using Reflection*/
         try {
-            // Let the magic start
-            Class[] wcClasses = WifiConfiguration.class.getClasses();
-            // null for overzealous java compiler
-            Class wcEnterpriseField = null;
+            Class<?> wifiEnterpriseField = null;
+            Class<?> wifiIpAssignmentField = null;
+            Class<?> wifiProxySettingsField = null;
 
-            for (Class wcClass : wcClasses)
-                if (wcClass.getName().equals(INT_ENTERPRISEFIELD_NAME)) 
-                {
-                    wcEnterpriseField = wcClass;
-                    break;
+            boolean enterpriseFieldType = true;
+            boolean ipAssignmentFieldType = true;
+            boolean proxySettingsFieldType = true;
+
+            Field anonymousId = null, caCert = null, clientCert = null, eap = null, identity = null, password = null, phase2 = null, privateKey = null, ipAssignment = null, proxy = null;
+
+            Method setValue = null;
+            Method setIpName = null;
+            Method setProxy = null;
+            Class<?>[] wifiClasses = WifiConfiguration.class.getClasses();
+
+            /*Get Enterprise/IP Assignment/Proxy Setting Field Class to Modify*/
+            for(Class<?> wifiClass : wifiClasses) {
+                if(wifiClass.getName().equals(INT_ENTERPRISEFIELD_NAME)) {
+                    wifiEnterpriseField = wifiClass;
                 }
-            boolean noEnterpriseFieldType = false; 
-            if(wcEnterpriseField == null)
-                noEnterpriseFieldType = true; // Cupcake/Donut access enterprise settings directly
-
-            Field wcefAnonymousId = null, wcefCaCert = null, wcefClientCert = null, wcefEap = null, wcefIdentity = null, wcefPassword = null, wcefPhase2 = null, wcefPrivateKey = null, wcefEngine = null, wcefEngineId = null;
-            Field[] wcefFields = WifiConfiguration.class.getFields();
-            // Dispatching Field vars
-            for (Field wcefField : wcefFields) 
-            {
-                if (wcefField.getName().equals(INT_ANONYMOUS_IDENTITY))
-                    wcefAnonymousId = wcefField;
-                else if (wcefField.getName().equals(INT_CA_CERT))
-                    wcefCaCert = wcefField;
-                else if (wcefField.getName().equals(INT_CLIENT_CERT))
-                    wcefClientCert = wcefField;
-                else if (wcefField.getName().equals(INT_EAP))
-                    wcefEap = wcefField;
-                else if (wcefField.getName().equals(INT_IDENTITY))
-                    wcefIdentity = wcefField;
-                else if (wcefField.getName().equals(INT_PASSWORD))
-                    wcefPassword = wcefField;
-                else if (wcefField.getName().equals(INT_PHASE2))
-                    wcefPhase2 = wcefField;
-                else if (wcefField.getName().equals(INT_PRIVATE_KEY))
-                    wcefPrivateKey = wcefField;
-                else if (wcefField.getName().equals("engine"))
-                    wcefEngine = wcefField;
-                else if (wcefField.getName().equals("engine_id"))
-                    wcefEngineId = wcefField;
+                else if(wifiClass.getName().equals(INT_IPASSIGNMENT)) {
+                    wifiIpAssignmentField = wifiClass;
+                }
+                else if(wifiClass.getName().equals(INT_PROXY_SETTINGS)) {
+                    wifiProxySettingsField = wifiClass;
+                }
             }
 
-
-            Method wcefSetValue = null;
-            if(!noEnterpriseFieldType){
-            for(Method m: wcEnterpriseField.getMethods())
-                //System.out.println(m.getName());
-                if(m.getName().trim().equals("setValue"))
-                    wcefSetValue = m;
+            /*Certain OS (Cupcake & Doughnut) access the enterprise field directly*/
+            if(wifiEnterpriseField == null) {
+                enterpriseFieldType = false;
+            }
+            if(wifiIpAssignmentField == null) {
+                ipAssignmentFieldType = false;
+            }
+            if(wifiProxySettingsField == null) {
+                proxySettingsFieldType = false;
             }
 
+            /*Get Fields*/
+            Log.d("Enterprise Setting", "Getting Fields ");
+            Field[] wifiFields = WifiConfiguration.class.getFields();
+            for(Field wifiField : wifiFields) {
+                if(wifiField.getName().equals(INT_ANONYMOUS_IDENTITY)) {
+                    anonymousId = wifiField;
+                    Log.d("Enterprise Setting", "INT_ANONYMOUS_IDENTITY: " + wifiField);
+                }
+                else if(wifiField.getName().equals(INT_CA_CERT)) {
+                    caCert = wifiField;
+                    Log.d("Enterprise Setting", "INT_CA_CERT: " + wifiField);
+                }
+                else if(wifiField.getName().equals(INT_CLIENT_CERT))
+                {
+                    clientCert = wifiField;
+                    Log.d("Enterprise Setting", "INT_CLIENT_CERT: " + wifiField);
+                }
+                else if(wifiField.getName().equals(INT_EAP)) {
+                    eap = wifiField;
+                    Log.d("Enterprise Setting", "INT_EAP: " + wifiField);
+                }
+                else if(wifiField.getName().equals(INT_IDENTITY)) {
+                    identity = wifiField;
+                    Log.d("Enterprise Setting", "INT_IDENTITY: " + wifiField);
+                }
+                else if(wifiField.getName().equals(INT_PASSWORD)) {
+                    password = wifiField;
+                    Log.d("Enterprise Setting", "INT_PASSWORD: " + wifiField);
+                }
+                else if(wifiField.getName().equals(INT_PHASE2)) {
+                    phase2 = wifiField;
+                    Log.d("Enterprise Setting", "INT_PHASE2: " + wifiField);
+                }
+                else if(wifiField.getName().equals(INT_PRIVATE_KEY)) {
+                    privateKey = wifiField;
+                    Log.d("Enterprise Setting", "INT_PRIVATE_KEY: " + wifiField);
+                }
+                else if(wifiField.getName().equals(INT_IP_ASSIGNMENT)) {
+                    ipAssignment = wifiField;
+                    Log.d("Enterprise Setting", "INT_IP_ASSIGNMENT: " + wifiField);
+                }
+                else if(wifiField.getName().equals(INT_PROXY_SETTINGS)) {
+                    proxy = wifiField;
+                    Log.d("Enterprise Setting", "INT_PROXY_SETTINGS 1: " + wifiField);
+                }
 
-            /*EAP Method*/
-            if(!noEnterpriseFieldType)
-            {
-                    wcefSetValue.invoke(wcefEap.get(selectedConfig), ENTERPRISE_EAP);
-            }
-            else
-            {
-                    wcefEap.set(selectedConfig, ENTERPRISE_EAP);
-            }
-            /*EAP Phase 2 Authentication*/
-            if(!noEnterpriseFieldType)
-            {
-                    wcefSetValue.invoke(wcefPhase2.get(selectedConfig), ENTERPRISE_PHASE2);
-            }
-            else
-            {
-                wcefPhase2.set(selectedConfig, ENTERPRISE_PHASE2);
-            }
-            /*EAP Anonymous Identity*/
-            if(!noEnterpriseFieldType)
-            {
-                    wcefSetValue.invoke(wcefAnonymousId.get(selectedConfig), ENTERPRISE_ANON_IDENT);
-            }
-            else
-            {
-                wcefAnonymousId.set(selectedConfig, ENTERPRISE_ANON_IDENT);
-            }
-            /*EAP CA Certificate*/
-            if(!noEnterpriseFieldType)
-            {
-                    wcefSetValue.invoke(wcefCaCert.get(selectedConfig), ENTERPRISE_CA_CERT);
-            }
-            else
-            {
-                wcefCaCert.set(selectedConfig, ENTERPRISE_CA_CERT);
-            }               
-            /*EAP Private key*/
-            if(!noEnterpriseFieldType)
-            {
-                    wcefSetValue.invoke(wcefPrivateKey.get(selectedConfig), ENTERPRISE_PRIV_KEY);
-            }
-            else
-            {
-                wcefPrivateKey.set(selectedConfig, ENTERPRISE_PRIV_KEY);
-            }               
-            /*EAP Identity*/
-            if(!noEnterpriseFieldType)
-            {
-                    wcefSetValue.invoke(wcefIdentity.get(selectedConfig), userName);
-            }
-            else
-            {
-                wcefIdentity.set(selectedConfig, userName);
-            }               
-            /*EAP Password*/
-            if(!noEnterpriseFieldType)
-            {
-                    wcefSetValue.invoke(wcefPassword.get(selectedConfig), passString);
-            }
-            else
-            {
-                wcefPassword.set(selectedConfig, passString);
-            }               
-            /*EAp Client certificate*/
-            if(!noEnterpriseFieldType)
-            {
-                wcefSetValue.invoke(wcefClientCert.get(selectedConfig), ENTERPRISE_CLIENT_CERT);
-            }
-            else
-            {
-                wcefClientCert.set(selectedConfig, ENTERPRISE_CLIENT_CERT);
-            }
-            /*Engine fields*/
-            if(!noEnterpriseFieldType)
-            {
-            wcefSetValue.invoke(wcefEngine.get(wifiConf), "1");
-            wcefSetValue.invoke(wcefEngineId.get(wifiConf), "keystore");
+                else {
+                    Log.d("Enterprise Setting", "INT_PROXY_SETTINGS 2: " + wifiField);
+                }
+
             }
 
-            // Adhoc for CM6
-            // if non-CM6 fails gracefully thanks to nested try-catch
-
-            try{
-            Field wcAdhoc = WifiConfiguration.class.getField("adhocSSID");
-            Field wcAdhocFreq = WifiConfiguration.class.getField("frequency");
-            //wcAdhoc.setBoolean(selectedConfig, prefs.getBoolean(PREF_ADHOC,
-            //      false));
-            wcAdhoc.setBoolean(selectedConfig, false);
-            int freq = 2462;    // default to channel 11
-            //int freq = Integer.parseInt(prefs.getString(PREF_ADHOC_FREQUENCY,
-            //"2462"));     // default to channel 11
-            //System.err.println(freq);
-            wcAdhocFreq.setInt(selectedConfig, freq); 
-            } catch (Exception e)
-            {
-                e.printStackTrace();
+            /*Get method to set value of enterprise fields*/
+            if(enterpriseFieldType) {
+                for(Method method : wifiEnterpriseField.getMethods()) {
+                    Log.d("Get Methods", "Enterprise Method: " + method);
+                    if(method.getName().trim().equals("setValue")) {
+                        setValue = method;
+                        break;
+                    }
+                }
             }
 
-        } catch (Exception e)
-        {
-            // TODO Auto-generated catch block
-            // FIXME As above, what should I do here?
+            /*Get method to set value of IP Assignment fields*/
+            if(ipAssignmentFieldType) {
+                for(Method method : wifiIpAssignmentField.getMethods()) {
+                    Log.d("Get Methods", "IP Method: " + method);
+                    if(method.getName().trim().equals("setName")) {
+                        setIpName = method;
+                        break;
+                    }
+                }
+            }
+
+            /*Get method to set value of IP Assignment fields*/
+            if(proxySettingsFieldType) {
+                for(Method method : wifiProxySettingsField.getMethods()) {
+                    Log.d("Get Methods", "Proxy Method: " + method);
+                    if(method.getName().trim().equals("setName")) {
+                        setProxy = method;
+                        break;
+                    }
+                }
+            }
+        }
+        catch(Exception e) {
             e.printStackTrace();
         }
 
-        return selectedConfig;
+        return wifiConfig;
     }
 }
